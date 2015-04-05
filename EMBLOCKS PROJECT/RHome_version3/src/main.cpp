@@ -323,6 +323,11 @@ extern "C"
             EXTI_ClearITPendingBit(EXTI_Line17);
         }
     }
+
+    void HardFault_Handler()
+    {
+        NVIC_SystemReset();
+    }
 }
 
 
@@ -1073,6 +1078,7 @@ void vTask2Function (void *pvParameters)
 #define kHTTP_OK_HEAD "HTTP/1.1 200 OK\r\nConnection: close\r\nServer: RHome\r\nPragma: no-cache\r\nContent-Length: "
 #define kHTTP_AUTH_HEAD "HTTP/1.1 403 Forbidden\r\nConnection: close\r\nServer: RHome\r\nPragma: no-cache\r\nContent-Length: "
 #define kHTTP_HEAD_PART2 "\r\nContent-Type: text/html\r\n\r\n"
+#define kHTTP_HEAD_PART2_API "\r\nContent-Type: application/json\r\n\r\n"
 
 void printWebPageStart(char *dest)
 {
@@ -1127,7 +1133,7 @@ void task3(void *pvParameters)
     // The actual web server task
     //
 
-    char tokens[5][20];
+    char tokens[6][20];
     char user_pass[45];
     int token = -1;
     int token_pointer = 0;
@@ -1145,7 +1151,7 @@ void task3(void *pvParameters)
 
         clearEthSendBuffer();
 
-        for (int i=0; i < 5; i++)
+        for (int i=0; i < 6; i++)
         {
             tokens[i][0] = '\0';
         }
@@ -1172,7 +1178,7 @@ void task3(void *pvParameters)
                 continue;
             }
 
-            if (token == -1 || token > 4 || token_pointer >= 18)
+            if (token == -1 || token > 5 || token_pointer >= 18)
             {
                 break;
             }
@@ -1209,24 +1215,32 @@ void task3(void *pvParameters)
             strcat(user_pass, "/");
             strcat(user_pass, tokens[1]);
 
-            if (strcmp(tokens[2], "lght") == 0)
+            bool webClient = true;
+            if (strcmp(tokens[2], "api") == 0)
             {
-                int index = atoi(tokens[3]);
+                // User wants to use API to control the room
+                // Do not show webpage, use JSON response
+                webClient = false;
+            }
+
+            if (strcmp(tokens[(webClient)? 2 : 3], "lght") == 0)
+            {
+                int index = atoi(tokens[(webClient)? 3 : 4]);
 
                 if (index >= 0 && index < lights.size())
                 {
-                    bool turnOn = (strcmp(tokens[4], "on") == 0)?true:false;
+                    bool turnOn = (strcmp(tokens[(webClient)? 4 : 5], "on") == 0)?true:false;
                     lights[index]->onOff(turnOn);
                 }
             }
 
-            if (strcmp(tokens[2], "bld") == 0)
+            if (strcmp(tokens[(webClient)? 2 : 3], "bld") == 0)
             {
-                int index = atoi(tokens[3]);
+                int index = atoi(tokens[(webClient)? 3 : 4]);
 
                 if (index >= 0 && index < blinds.size())
                 {
-                    int newPos = atoi(tokens[4]);
+                    int newPos = atoi(tokens[(webClient)? 4 : 5]);
                     if (newPos >= 0 && newPos <= 2)
                     {
                         blinds[index]->toggleState(newPos);
@@ -1237,77 +1251,125 @@ void task3(void *pvParameters)
             clearWifiUsart1Buffer();
             clearEthSendBuffer();
 
-            printWebPageStart(eth_send_buff);
-            strcat((char *)eth_send_buff, "<div class='left_top' style='border-right: solid #9BCCF5 1px; border-bottom: solid #9BCCF5 1px; '><div style='padding: 10px; float: right;'><div style='text-align:right;' class='elements'>");
-
-            for (int i = 0; i < lights.size(); i++)
+            if (webClient)
             {
-                //light_off'>&nbsp;</div>&nbsp;&nbsp;<button>On</button>&nbsp;<button>Off</button><br />
-                sprintf(web_buff, "%d", i);
-                strcat((char *)eth_send_buff, lights[i]->getName());
-                strcat((char *)eth_send_buff, ":&nbsp;&nbsp;<div class='");
-                strcat((char *)eth_send_buff, (lights[i]->isOn())?"light_on":"light_off");
-                strcat((char *)eth_send_buff, "'>&nbsp;</div>&nbsp;&nbsp;<button onclick=\"location.href = '/");
-                strcat((char *)eth_send_buff, user_pass);
-                strcat((char *)eth_send_buff, "/lght/");
+                printWebPageStart(eth_send_buff);
+                strcat((char *)eth_send_buff, "<div class='left_top' style='border-right: solid #9BCCF5 1px; border-bottom: solid #9BCCF5 1px; '><div style='padding: 10px; float: right;'><div style='text-align:right;' class='elements'>");
+
+                for (int i = 0; i < lights.size(); i++)
+                {
+                    //light_off'>&nbsp;</div>&nbsp;&nbsp;<button>On</button>&nbsp;<button>Off</button><br />
+                    sprintf(web_buff, "%d", i);
+                    strcat((char *)eth_send_buff, lights[i]->getName());
+                    strcat((char *)eth_send_buff, ":&nbsp;&nbsp;<div class='");
+                    strcat((char *)eth_send_buff, (lights[i]->isOn())?"light_on":"light_off");
+                    strcat((char *)eth_send_buff, "'>&nbsp;</div>&nbsp;&nbsp;<button onclick=\"location.href = '/");
+                    strcat((char *)eth_send_buff, user_pass);
+                    strcat((char *)eth_send_buff, "/lght/");
+                    strcat((char *)eth_send_buff, web_buff);
+                    strcat((char *)eth_send_buff, "/on';\" >On</button>");
+                    strcat((char *)eth_send_buff, "&nbsp;<button onclick=\"location.href = '/");
+                    strcat((char *)eth_send_buff, user_pass);
+                    strcat((char *)eth_send_buff, "/lght/");
+                    strcat((char *)eth_send_buff, web_buff);
+                    strcat((char *)eth_send_buff, "/off';\" >Off</button>");
+                    strcat((char *)eth_send_buff, "<br />");
+                }
+                strcat((char *)eth_send_buff, "</div></div><h1 style='position: relative; bottom:-235px; left: 10px; '>Lights</h1></div><div class='left_top' style='border-left: solid #9BCCF5 1px; border-bottom: solid #9BCCF5 1px;'><h1 style='position: relative; bottom:-235px; float: right; right: 10px;'>Blinds</h1><div style='padding: 10px'><div style='text-align:left;' class='elements'>");
+                //Left:&nbsp;&nbsp;<progress value='10' max='100'></progress>&nbsp;&nbsp;<button>Min</button>&nbsp;<button>Mid</button>&nbsp;<button>Max</button><br />
+                for (int i = 0; i < blinds.size(); i++)
+                {
+                    sprintf(web_buff, "%d", i);
+                    strcat((char *)eth_send_buff, "<progress value='");
+                    strcat((char *)eth_send_buff, (blinds[i]->getState() == 0)? "1": (blinds[i]->getState() == 1)? "50" : "100");
+                    strcat((char *)eth_send_buff, "' max='100'></progress>&nbsp;&nbsp;<button onclick=\"location.href = '/");
+                    strcat((char *)eth_send_buff, user_pass);
+                    strcat((char *)eth_send_buff, "/bld/");
+                    strcat((char *)eth_send_buff, web_buff);
+                    strcat((char *)eth_send_buff, "/0';\" >&lt;</button>");
+                    strcat((char *)eth_send_buff, "&nbsp;<button onclick=\"location.href = '/");
+                    strcat((char *)eth_send_buff, user_pass);
+                    strcat((char *)eth_send_buff, "/bld/");
+                    strcat((char *)eth_send_buff, web_buff);
+                    strcat((char *)eth_send_buff, "/1';\" >-</button>");
+                    strcat((char *)eth_send_buff, "&nbsp;<button onclick=\"location.href = '/");
+                    strcat((char *)eth_send_buff, user_pass);
+                    strcat((char *)eth_send_buff, "/bld/");
+                    strcat((char *)eth_send_buff, web_buff);
+                    strcat((char *)eth_send_buff, "/2';\" >&gt;</button>&nbsp;&nbsp;");
+                    strcat((char *)eth_send_buff, blinds[i]->getName());
+                    strcat((char *)eth_send_buff, "<br />");
+                }
+
+                strcat((char *)eth_send_buff, "</div></div></div><div class='left_top' style='border-right: solid #9BCCF5 1px; border-top: solid #9BCCF5 1px;'><div style='padding: 10px; float: left;'><h1>Info</h1></div><div style='text-align:right; margin-right:50px;' class='elements'>Temperature: ");
+                float temperature = tempSensor.getTemp();
+                sprintf((char *)web_buff, "%d", (int)temperature);
                 strcat((char *)eth_send_buff, web_buff);
-                strcat((char *)eth_send_buff, "/on';\" >On</button>");
-                strcat((char *)eth_send_buff, "&nbsp;<button onclick=\"location.href = '/");
-                strcat((char *)eth_send_buff, user_pass);
-                strcat((char *)eth_send_buff, "/lght/");
+                strcat((char *)eth_send_buff, "°C<br />");
+                //strcat((char *)eth_send_buff, "C<br />Outside: 34C<br />");
+
+                RTC_TimeTypeDef RTC_TimeStruct;
+                RTC_GetTime(RTC_Format_BIN, &RTC_TimeStruct);
+                sprintf(web_buff,"%02d:%02d:%02d", RTC_TimeStruct.RTC_Hours, RTC_TimeStruct.RTC_Minutes, RTC_TimeStruct.RTC_Seconds);
                 strcat((char *)eth_send_buff, web_buff);
-                strcat((char *)eth_send_buff, "/off';\" >Off</button>");
-                strcat((char *)eth_send_buff, "<br />");
+                strcat((char *)eth_send_buff, "<br /><button onclick=\"location.href = '/");
+                strcat((char *)eth_send_buff, user_pass);
+                strcat((char *)eth_send_buff, "';\" >Refresh</button>");
+
+                strcat((char *)eth_send_buff, "</div></div><div class='left_top' style='border-left: solid #9BCCF5 1px; border-top: solid #9BCCF5 1px;'><div class='elements' style='margin-left:50px;'>Rhome v3.0<br />http://www.r00li.com</div><div style='padding: 10px;'><h1 style='float:right;'>&nbsp;</h1></div></div><div style='background-color: #0284F0; display:block; width: 100px; border-radius: 50px; height: 100px; position: relative; left:450px; top: 225px;'></div>");
+                printWebPageEnd(eth_send_buff);
             }
-            strcat((char *)eth_send_buff, "</div></div><h1 style='position: relative; bottom:-235px; left: 10px; '>Lights</h1></div><div class='left_top' style='border-left: solid #9BCCF5 1px; border-bottom: solid #9BCCF5 1px;'><h1 style='position: relative; bottom:-235px; float: right; right: 10px;'>Blinds</h1><div style='padding: 10px'><div style='text-align:left;' class='elements'>");
-            //Left:&nbsp;&nbsp;<progress value='10' max='100'></progress>&nbsp;&nbsp;<button>Min</button>&nbsp;<button>Mid</button>&nbsp;<button>Max</button><br />
-            for (int i = 0; i < blinds.size(); i++)
+            else
             {
-                sprintf(web_buff, "%d", i);
-                strcat((char *)eth_send_buff, "<progress value='");
-                strcat((char *)eth_send_buff, (blinds[i]->getState() == 0)? "1": (blinds[i]->getState() == 1)? "50" : "100");
-                strcat((char *)eth_send_buff, "' max='100'></progress>&nbsp;&nbsp;<button onclick=\"location.href = '/");
-                strcat((char *)eth_send_buff, user_pass);
-                strcat((char *)eth_send_buff, "/bld/");
+                strcat((char *)eth_send_buff, "{\"lights\":[");
+
+                for (int i = 0; i < lights.size(); i++)
+                {
+                    sprintf(web_buff, "{\"id\":%d,", i);
+                    strcat((char *)eth_send_buff, web_buff);
+                    strcat((char *)eth_send_buff, "\"name\":\"");
+                    strcat((char *)eth_send_buff, lights[i]->getName());
+                    strcat((char *)eth_send_buff, "\",\"status\":\"");
+                    strcat((char *)eth_send_buff, (lights[i]->isOn())?"1":"0");
+                    strcat((char *)eth_send_buff, "\"}");
+
+                    strcat((char *)eth_send_buff, (i < lights.size()-1) ? "," : "");
+                }
+                strcat((char *)eth_send_buff, "], \"blinds\":[");
+
+                for (int i = 0; i < blinds.size(); i++)
+                {
+                    sprintf(web_buff, "{\"id\":%d,", i);
+                    strcat((char *)eth_send_buff, web_buff);
+                    strcat((char *)eth_send_buff, "\"status\":");
+                    strcat((char *)eth_send_buff, (blinds[i]->getState() == 0)? "0": (blinds[i]->getState() == 1)? "1" : "2");
+                    strcat((char *)eth_send_buff, ",\"name\":\"");
+                    strcat((char *)eth_send_buff, blinds[i]->getName());
+                    strcat((char *)eth_send_buff, "\"}");
+
+                    strcat((char *)eth_send_buff, (i < blinds.size()-1) ? "," : "");
+                }
+                strcat((char *)eth_send_buff, "], \"temperature\":");
+
+                float temperature = tempSensor.getTemp();
+                sprintf((char *)web_buff, "%d", (int)temperature);
                 strcat((char *)eth_send_buff, web_buff);
-                strcat((char *)eth_send_buff, "/0';\" >&lt;</button>");
-                strcat((char *)eth_send_buff, "&nbsp;<button onclick=\"location.href = '/");
-                strcat((char *)eth_send_buff, user_pass);
-                strcat((char *)eth_send_buff, "/bld/");
+                strcat((char *)eth_send_buff, ",\"time\":");
+                //strcat((char *)eth_send_buff, "C<br />Outside: 34C<br />");
+
+                RTC_TimeTypeDef RTC_TimeStruct;
+                RTC_GetTime(RTC_Format_BIN, &RTC_TimeStruct);
+                sprintf(web_buff,"\"%02d:%02d:%02d\",", RTC_TimeStruct.RTC_Hours, RTC_TimeStruct.RTC_Minutes, RTC_TimeStruct.RTC_Seconds);
                 strcat((char *)eth_send_buff, web_buff);
-                strcat((char *)eth_send_buff, "/1';\" >-</button>");
-                strcat((char *)eth_send_buff, "&nbsp;<button onclick=\"location.href = '/");
-                strcat((char *)eth_send_buff, user_pass);
-                strcat((char *)eth_send_buff, "/bld/");
-                strcat((char *)eth_send_buff, web_buff);
-                strcat((char *)eth_send_buff, "/2';\" >&gt;</button>&nbsp;&nbsp;");
-                strcat((char *)eth_send_buff, blinds[i]->getName());
-                strcat((char *)eth_send_buff, "<br />");
+
+                strcat((char *)eth_send_buff, "\"api_ver\":1 }");
             }
-
-            strcat((char *)eth_send_buff, "</div></div></div><div class='left_top' style='border-right: solid #9BCCF5 1px; border-top: solid #9BCCF5 1px;'><div style='padding: 10px; float: left;'><h1>Info</h1></div><div style='text-align:right; margin-right:50px;' class='elements'>Temperature: ");
-            float temperature = tempSensor.getTemp();
-            sprintf((char *)web_buff, "%d", (int)temperature);
-            strcat((char *)eth_send_buff, web_buff);
-            strcat((char *)eth_send_buff, "°C<br />");
-            //strcat((char *)eth_send_buff, "C<br />Outside: 34C<br />");
-
-            RTC_TimeTypeDef RTC_TimeStruct;
-            RTC_GetTime(RTC_Format_BIN, &RTC_TimeStruct);
-            sprintf(web_buff,"%02d:%02d:%02d", RTC_TimeStruct.RTC_Hours, RTC_TimeStruct.RTC_Minutes, RTC_TimeStruct.RTC_Seconds);
-            strcat((char *)eth_send_buff, web_buff);
-            strcat((char *)eth_send_buff, "<br /><button onclick=\"location.href = '/");
-            strcat((char *)eth_send_buff, user_pass);
-            strcat((char *)eth_send_buff, "';\" >Refresh</button>");
-
-            strcat((char *)eth_send_buff, "</div></div><div class='left_top' style='border-left: solid #9BCCF5 1px; border-top: solid #9BCCF5 1px;'><div class='elements' style='margin-left:50px;'>Rhome v3.0<br />http://www.r00li.com</div><div style='padding: 10px;'><h1 style='float:right;'>&nbsp;</h1></div></div><div style='background-color: #0284F0; display:block; width: 100px; border-radius: 50px; height: 100px; position: relative; left:450px; top: 225px;'></div>");
-            printWebPageEnd(eth_send_buff);
 
             sprintf(web_buff, "%d", strlen((char *)eth_send_buff));
 
             strcat((char *)eth1_buff, kHTTP_OK_HEAD);
             strcat((char *)eth1_buff, web_buff);
-            strcat((char *)eth1_buff, kHTTP_HEAD_PART2);
+            strcat((char *)eth1_buff, (webClient)? kHTTP_HEAD_PART2 : kHTTP_HEAD_PART2_API);
             //strcat((char *)eth1_buff, (char *)eth_send_buff);
 
             sendWifiUsart1((char *)eth1_buff);
